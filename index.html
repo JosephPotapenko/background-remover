@@ -1,37 +1,111 @@
-<!-- TO ACHIEVE THIS TYPE IN "!" AND PRESS "TAB" -->
 <!DOCTYPE html>
-<!-- html below is a tag pair. "lang" is a language setting and is set to English. Html has 2 children: head and body -->
 <html lang="en">
-<!-- head below is a tag pair. It contains metadata about the document and links to external resources. -->
 <head>
-    <!-- meta below is a tag pair. It provides metadata about the HTML document. chrset = "UTF-8" is pulling all latin charachters-->
-    <meta charset="UTF-8">
-    <!-- Tag pair. Provides metadata about the HTML document. name = "viewport" is setting the viewport to the device's width and initial scale to 1.0 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Dev Starter</title>
-
-    <!-- Favicons -->
-    <link rel="icon" type="image/png" href="/favicons/favicon-48x48.png" sizes="48x48" />
-    <link rel="icon" type="image/svg+xml" href="/favicons/favicon.svg" />
-    <link rel="shortcut icon" href="/favicons/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/favicons/apple-touch-icon.png" />
-    <meta name="apple-mobile-web-app-title" content="Web Dev Starter" />
-    <link rel="manifest" href="/favicons/site.webmanifest" />    
-
-    <!-- Stylesheet -->
-    <link rel="stylesheet" href="style.css">
-
-    <!-- JavaScript -->
-     <!-- script:src and then press tab for shortcut-->
-    <script src="script.js" defer> </script>
-
+  <meta charset="UTF-8" />
+  <title>Background Remover</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 2rem; }
+    canvas { border: 1px solid #ccc; margin-top: 1rem; cursor: crosshair; }
+    .controls { margin-top: 1rem; }
+  </style>
 </head>
-
-<!-- body below is a tag pair. It contains the content of the document. -->
 <body>
+  <h1>Simple Background Remover</h1>
+  <input type="file" id="fileInput" accept="image/*" />
+  <div class="controls">
+    <label>Brush Size: <input type="range" id="brushSize" min="5" max="100" value="30" /></label>
+    <label><input type="radio" name="mode" value="erase" checked /> Erase</label>
+    <label><input type="radio" name="mode" value="restore" /> Restore</label>
+    <button onclick="download()">Download</button>
+  </div>
+  <canvas id="canvas"></canvas>
 
-    <h1>Web Dev Starter</h1>
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    let img = new Image();
+    let isDrawing = false;
+    let brushSize = 30;
+    let mode = "erase";
+    let originalImageData;
 
+    document.getElementById("brushSize").oninput = e => {
+      brushSize = parseInt(e.target.value, 10);
+    };
+
+    document.querySelectorAll('input[name="mode"]').forEach(input => {
+      input.onchange = () => {
+        mode = input.value;
+      };
+    });
+
+    document.getElementById("fileInput").addEventListener("change", function () {
+      const file = this.files[0];
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        img.onload = () => {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+          originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    canvas.addEventListener("mousedown", e => {
+      isDrawing = true;
+      draw(e);
+    });
+
+    canvas.addEventListener("mousemove", e => {
+      if (isDrawing) draw(e);
+    });
+
+    canvas.addEventListener("mouseup", () => {
+      isDrawing = false;
+    });
+
+    function draw(e) {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      if (mode === "erase") {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.clearRect(x - brushSize / 2, y - brushSize / 2, brushSize, brushSize);
+        ctx.restore();
+      } else if (mode === "restore") {
+        const restore = ctx.createImageData(brushSize, brushSize);
+        for (let dx = -brushSize / 2; dx < brushSize / 2; dx++) {
+          for (let dy = -brushSize / 2; dy < brushSize / 2; dy++) {
+            const sx = Math.floor(x + dx);
+            const sy = Math.floor(y + dy);
+            if (sx < 0 || sy < 0 || sx >= canvas.width || sy >= canvas.height) continue;
+
+            const index = (sy * canvas.width + sx) * 4;
+            const r = originalImageData.data[index];
+            const g = originalImageData.data[index + 1];
+            const b = originalImageData.data[index + 2];
+            const a = originalImageData.data[index + 3];
+
+            ctx.fillStyle = `rgba(${r},${g},${b},${a / 255})`;
+            ctx.fillRect(sx, sy, 1, 1);
+          }
+        }
+      }
+    }
+
+    function download() {
+      const link = document.createElement("a");
+      link.download = "edited-image.png";
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    }
+  </script>
 </body>
 </html>
-
