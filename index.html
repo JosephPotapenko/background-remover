@@ -12,10 +12,27 @@
     button { margin: 0.5rem; }
     .select-checkbox { position: absolute; top: 5px; left: 5px; }
     #bottom-controls { margin-top: 2rem; }
+    details { margin: 1rem auto; text-align: left; max-width: 800px; }
   </style>
 </head>
 <body>
   <h2>Advanced Background Remover</h2>
+  <details>
+    <summary style="max-width: 640px; margin: 0 auto 1em auto; text-align: center;"><strong>Instructions</strong></summary>
+    <p style="max-width: 640px; margin: 0 auto 1em auto;"></p>
+      Upload one or more images using the file input below. You can edit each image manually using the brush tools:
+      <br><span style="margin-left:2em;"><strong>Erase</strong></span> to remove,
+      <br><span style="margin-left:2em;"><strong>Restore</strong></span> to paint back original content, or use
+      <br><span style="margin-left:2em;"><strong>Magic Fill</strong></span> to remove areas with similar colors by clicking. Adjust brush size and tolerance as needed.
+      <br><br>Optionally, use the:
+      <br><span style="margin-left:2em;"><strong>Auto Process</strong></span> button under each image to automatically remove background based on edge detection. 
+      <br><br>All actions including auto-processing are undoable using the:
+      <br><span style="margin-left:2em;"><strong>Undo</strong></span> button. Select images and click
+      <br><span style="margin-left:2em;"><strong>Download Selected</strong></span> to save your edits.
+    </p>
+    <br>
+  </details>
+
   <input type="file" id="fileInput" accept="image/*" multiple><br>
   <label>Brush Size: <input type="range" id="brushSize" min="5" max="100" value="30"></label>
   <label><input type="radio" name="mode" value="erase" checked> Erase</label>
@@ -107,12 +124,16 @@
         this.undoBtn = document.createElement("button");
         this.undoBtn.textContent = "Undo";
 
+        this.autoBtn = document.createElement("button");
+        this.autoBtn.textContent = "Auto Process";
+
         this.downloadBtn = document.createElement("button");
         this.downloadBtn.textContent = "Download";
 
         this.controls = document.createElement("div");
         this.controls.className = "controls";
         this.controls.appendChild(this.undoBtn);
+        this.controls.appendChild(this.autoBtn);
         this.controls.appendChild(this.downloadBtn);
 
         this.container.appendChild(this.selectCheckbox);
@@ -132,6 +153,7 @@
         this.canvas.addEventListener("mouseleave", () => this.drawing = false);
 
         this.undoBtn.onclick = () => this.undo();
+        this.autoBtn.onclick = () => this.autoProcess();
         this.downloadBtn.onclick = () => this.download();
       }
 
@@ -139,6 +161,11 @@
         this.canvas.width = this.img.width;
         this.canvas.height = this.img.height;
         this.ctx.drawImage(this.img, 0, 0);
+        this.original = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+      }
+
+      autoProcess() {
+        this.save();
         let id = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
         let d = id.data, w = this.canvas.width, h = this.canvas.height;
         let bg = getEdgeColor(d, w, h);
@@ -148,15 +175,14 @@
           if (dist < 50) d[i+3] = 0;
         }
         this.ctx.putImageData(id, 0, 0);
-        this.original = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
       }
 
       draw(e) {
         const r = this.canvas.getBoundingClientRect();
         const x = Math.floor(e.clientX - r.left);
         const y = Math.floor(e.clientY - r.top);
+        if (mode === "erase" || mode === "restore") this.save();
         if (mode === "erase") {
-          this.save();
           this.ctx.save();
           this.ctx.beginPath();
           this.ctx.arc(x, y, brushSize/2, 0, 2*Math.PI);
@@ -164,7 +190,6 @@
           this.ctx.clearRect(x-brushSize/2, y-brushSize/2, brushSize, brushSize);
           this.ctx.restore();
         } else if (mode === "restore") {
-          this.save();
           for (let dx = -brushSize/2; dx < brushSize/2; dx++) {
             for (let dy = -brushSize/2; dy < brushSize/2; dy++) {
               const sx = x + dx, sy = y + dy;
