@@ -13,6 +13,24 @@
     .select-checkbox { position: absolute; top: 5px; left: 5px; }
     #bottom-controls { margin-top: 2rem; }
     details { margin: 1rem auto; text-align: left; max-width: 800px; }
+    .controls button.smooth-btn {
+      background-color: #ffc107;
+      color: #333;
+      border: none;
+      border-radius: 4px;
+    }
+    .controls button.spec-btn {
+      background-color: #343a40;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+    }
+    .controls button.undo-btn, .controls button.redo-btn {
+      background-color: #6c757d;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -129,12 +147,40 @@
 
         this.downloadBtn = document.createElement("button");
         this.downloadBtn.textContent = "Download";
-
+        this.continueBtn = document.createElement("button");
+        this.continueBtn.textContent = "Continue Editing";
+        // Smoothing slider and button
+        this.smoothSlider = document.createElement("input");
+        this.smoothSlider.type = "range";
+        this.smoothSlider.min = 0;
+        this.smoothSlider.max = 100;
+        this.smoothSlider.value = 0;
+        this.smoothSlider.style.width = "80px";
+        this.smoothBtn = document.createElement("button");
+        this.smoothBtn.textContent = "Smooth Edges";
+        this.smoothBtn.className = "smooth-btn";
+        // Remove specs button
+        this.specBtn = document.createElement("button");
+        this.specBtn.textContent = "Remove Specs";
+        this.specBtn.className = "spec-btn";
+        // Undo/Redo buttons
+        this.undoBtn2 = document.createElement("button");
+        this.undoBtn2.textContent = "Undo";
+        this.undoBtn2.className = "undo-btn";
+        this.redoBtn = document.createElement("button");
+        this.redoBtn.textContent = "Redo";
+        this.redoBtn.className = "redo-btn";
         this.controls = document.createElement("div");
         this.controls.className = "controls";
         this.controls.appendChild(this.undoBtn);
         this.controls.appendChild(this.autoBtn);
         this.controls.appendChild(this.downloadBtn);
+        this.controls.appendChild(this.continueBtn);
+        this.controls.appendChild(this.smoothSlider);
+        this.controls.appendChild(this.smoothBtn);
+        this.controls.appendChild(this.specBtn);
+        this.controls.appendChild(this.undoBtn2);
+        this.controls.appendChild(this.redoBtn);
 
         this.container.appendChild(this.selectCheckbox);
         this.container.appendChild(this.canvas);
@@ -146,15 +192,24 @@
         this.img.src = URL.createObjectURL(file);
 
         this.undoStack = [];
+        this.redoStack = [];
 
-        this.canvas.addEventListener("mousedown", e => { this.drawing = true; this.draw(e); });
+        this.canvas.addEventListener("mousedown", e => { 
+          this.drawing = true; 
+          this.strokeStarted = false;
+          this.draw(e); 
+        });
         this.canvas.addEventListener("mousemove", e => this.drawing && this.draw(e));
         this.canvas.addEventListener("mouseup", () => this.drawing = false);
         this.canvas.addEventListener("mouseleave", () => this.drawing = false);
-
         this.undoBtn.onclick = () => this.undo();
         this.autoBtn.onclick = () => this.autoProcess();
         this.downloadBtn.onclick = () => this.download();
+        this.continueBtn.onclick = () => this.sendToSecondStage();
+        this.smoothBtn.onclick = () => this.smoothEdges();
+        this.specBtn.onclick = () => this.removeSpecs();
+        this.undoBtn2.onclick = () => this.undo();
+        this.redoBtn.onclick = () => this.redo();
       }
 
       init() {
@@ -181,7 +236,13 @@
         const r = this.canvas.getBoundingClientRect();
         const x = Math.floor(e.clientX - r.left);
         const y = Math.floor(e.clientY - r.top);
-        if (mode === "erase" || mode === "restore") this.save();
+        
+        // Only save once at the start of a stroke for erase/restore modes
+        if ((mode === "erase" || mode === "restore") && !this.strokeStarted) {
+          this.save();
+          this.strokeStarted = true;
+        }
+        
         if (mode === "erase") {
           this.ctx.save();
           this.ctx.beginPath();
@@ -204,6 +265,7 @@
             }
           }
         } else if (mode === "bucket") {
+          // Magic Fill still saves immediately since it's a single click operation
           this.save();
           let id = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
           let px = getPixel(id.data, x, y, this.canvas.width);
@@ -214,19 +276,224 @@
 
       save() {
         this.undoStack.push(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height));
-        if (this.undoStack.length > 10) this.undoStack.shift();
+        if (this.undoStack.length > 50) this.undoStack.shift();
+        // Clear redo stack on new action
+        this.redoStack = [];
       }
 
       undo() {
         if (!this.undoStack.length) return;
-        this.ctx.putImageData(this.undoStack.pop(), 0, 0);
+        const last = this.undoStack.pop();
+        this.redoStack.push(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height));
+        this.ctx.putImageData(last, 0, 0);
+      }
+
+      redo() {
+        if (!this.redoStack.length) return;
+        this.save(); // Save current before redo
+        const redoImg = this.redoStack.pop();
+        this.ctx.putImageData(redoImg, 0, 0);
+      }
+
+      smoothEdges() {
+        this.save();
+        // Smoothing algorithm: erode then dilate based on slider value
+        const level = parseInt(this.smoothSlider.value);
+        if (level === 0) return; // No smoothing
+        let id = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+        let data = id.data, w = this.canvas.width, h = this.canvas.height;
+        // Erode: shrink alpha edges
+        for (let n = 0; n < Math.ceil(level/20); n++) {
+          let newAlpha = new Uint8ClampedArray(data.length);
+          for (let y = 1; y < h-1; y++) {
+            for (let x = 1; x < w-1; x++) {
+              const i = (y*w + x)*4 + 3;
+              if (data[i] === 0) continue;
+              let count = 0;
+              for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                  if (dx === 0 && dy === 0) continue;
+                  if (data[((y+dy)*w + (x+dx))*4 + 3] === 0) count++;
+                }
+              }
+              newAlpha[i] = count > 2 ? 0 : data[i];
+            }
+          }
+          for (let i = 3; i < data.length; i += 4) if (newAlpha[i]) data[i] = newAlpha[i];
+        }
+        // Dilate: grow alpha edges
+        for (let n = 0; n < Math.ceil(level/20); n++) {
+          let newAlpha = new Uint8ClampedArray(data.length);
+          for (let y = 1; y < h-1; y++) {
+            for (let x = 1; x < w-1; x++) {
+              const i = (y*w + x)*4 + 3;
+              if (data[i] !== 0) continue;
+              let count = 0;
+              for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                  if (dx === 0 && dy === 0) continue;
+                  if (data[((y+dy)*w + (x+dx))*4 + 3] > 0) count++;
+                }
+              }
+              newAlpha[i] = count > 2 ? 255 : data[i];
+            }
+          }
+          for (let i = 3; i < data.length; i += 4) if (newAlpha[i]) data[i] = newAlpha[i];
+        }
+        this.ctx.putImageData(id, 0, 0);
+      }
+
+      removeSpecs() {
+        this.save();
+        // Remove small isolated specs/blotches that are not connected to main image areas
+        let id = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+        let data = id.data, w = this.canvas.width, h = this.canvas.height;
+        let visited = new Uint8Array(w*h);
+        let mainAreas = new Set(); // Store pixels that are part of main image areas
+        
+        function getIdx(x, y) { return y*w + x; }
+        
+        // First pass: identify all connected components and mark large ones as main areas
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const i = getIdx(x, y);
+            if (visited[i]) continue;
+            const alpha = data[i*4+3];
+            if (alpha === 0) continue;
+            
+            // Flood fill to get the size of this connected component
+            let stack = [[x, y]], pixels = [];
+            visited[i] = 1;
+            while (stack.length) {
+              const [cx, cy] = stack.pop();
+              const idx = getIdx(cx, cy);
+              pixels.push(idx);
+              for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                  if (dx === 0 && dy === 0) continue;
+                  const nx = cx + dx, ny = cy + dy;
+                  if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                  const nidx = getIdx(nx, ny);
+                  if (visited[nidx]) continue;
+                  if (data[nidx*4+3] === 0) continue;
+                  stack.push([nx, ny]);
+                  visited[nidx] = 1;
+                }
+              }
+            }
+            
+            // If this component is large enough, mark it as a main area
+            if (pixels.length >= 100) { // Components with 100+ pixels are considered main areas
+              for (const idx of pixels) {
+                mainAreas.add(idx);
+              }
+            }
+          }
+        }
+        
+        // Second pass: remove small dark specs that are NOT part of main areas
+        visited.fill(0); // Reset visited array
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const i = getIdx(x, y);
+            if (visited[i]) continue;
+            const alpha = data[i*4+3];
+            if (alpha === 0) continue;
+            if (mainAreas.has(i)) continue; // Skip if this pixel is part of a main area
+            
+            // Check if this is a dark spec (black/dark colors)
+            if (data[i*4] < 50 && data[i*4+1] < 50 && data[i*4+2] < 50) {
+              // Flood fill to get the size of this dark spec
+              let stack = [[x, y]], pixels = [];
+              visited[i] = 1;
+              while (stack.length) {
+                const [cx, cy] = stack.pop();
+                const idx = getIdx(cx, cy);
+                pixels.push(idx);
+                for (let dx = -1; dx <= 1; dx++) {
+                  for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = cx + dx, ny = cy + dy;
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                    const nidx = getIdx(nx, ny);
+                    if (visited[nidx]) continue;
+                    if (data[nidx*4+3] === 0) continue;
+                    if (mainAreas.has(nidx)) continue; // Don't include main area pixels
+                    if (data[nidx*4] < 50 && data[nidx*4+1] < 50 && data[nidx*4+2] < 50) {
+                      stack.push([nx, ny]);
+                      visited[nidx] = 1;
+                    }
+                  }
+                }
+              }
+              
+              // Remove small dark specs (less than 100 pixels)
+              if (pixels.length < 100) {
+                for (const idx of pixels) {
+                  data[idx*4+3] = 0; // Make transparent
+                }
+              }
+            }
+          }
+        }
+        this.ctx.putImageData(id, 0, 0);
       }
 
       download() {
-        const a = document.createElement("a");
-        a.download = this.file.name.replace(/\.[^.]+$/, "-cleaned.png");
-        a.href = this.canvas.toDataURL();
-        a.click();
+        // Create a download link and trigger it
+        const link = document.createElement("a");
+        link.download = this.file.name.replace(/\.[^.]+$/, "-cleaned.png");
+        
+        // Convert canvas to blob and create object URL
+        this.canvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          link.href = url;
+          
+          // Trigger download
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          // Clean up the object URL
+          setTimeout(() => URL.revokeObjectURL(url), 100);
+        }, "image/png");
+      }
+
+      sendToSecondStage() {
+        // Create a temporary image from the current canvas
+        const img = new Image();
+        img.onload = () => {
+          // Set the thumbnail preview
+          thumbnailPreview.src = img.src;
+          
+          // Get the visible bounds of the processed image
+          const bounds = getVisibleBounds(img);
+          
+          // Apply spacing and centering
+          const spacing = parseFloat(spacingSlider.value) / 100;
+          ctx.clearRect(0, 0, 400, 400);
+          const scale = 1 - spacing * 2;
+          const drawW = bounds.width * scale;
+          const drawH = bounds.height * scale;
+          const dx = (400 - drawW) / 2;
+          const dy = (400 - drawH) / 2;
+          
+          // Draw the processed image to the main canvas
+          ctx.drawImage(img, bounds.x, bounds.y, bounds.width, bounds.height, dx, dy, drawW, drawH);
+          
+          // Create a blob for download functionality
+          canvas.toBlob(blob => {
+            processedBlob = blob;
+            // Add to processed blobs array for batch download
+            if (!processedBlobs.includes(blob)) {
+              processedBlobs.push(blob);
+            }
+          }, "image/png");
+          
+          // Scroll to the second section
+          document.getElementById("canvas").scrollIntoView({ behavior: 'smooth' });
+        };
+        img.src = this.canvas.toDataURL();
       }
     }
 
