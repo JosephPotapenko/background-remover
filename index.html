@@ -226,6 +226,7 @@
         this.canvas.addEventListener("mousedown", e => { 
           this.drawing = true; 
           this.strokeStarted = false;
+          this.canvas.focus({ preventScroll: true }); // Prevent automatic scrolling when focusing
           this.draw(e); 
         });
         this.canvas.addEventListener("mousemove", e => this.drawing && this.draw(e));
@@ -242,11 +243,6 @@
             e.preventDefault();
             this.redo();
           }
-        });
-        
-        // Focus canvas on mouse enter for keyboard shortcuts
-        this.canvas.addEventListener("mouseenter", () => {
-          this.canvas.focus();
         });
         
         this.undoBtn.onclick = () => this.undo();
@@ -590,6 +586,21 @@
 
     selectAllBtn.onclick = () => editors.forEach(ed => ed.selectCheckbox.checked = true);
     deselectAllBtn.onclick = () => editors.forEach(ed => ed.selectCheckbox.checked = false);
+    
+    // Global keyboard shortcuts - works when not focused on any specific canvas
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        // Find the last active editor (if any)
+        const lastActive = editors.find(ed => ed.canvas === document.activeElement) || editors[editors.length - 1];
+        if (lastActive) lastActive.undo();
+      } else if (e.ctrlKey && e.key === 'y') {
+        e.preventDefault();
+        // Find the last active editor (if any)
+        const lastActive = editors.find(ed => ed.canvas === document.activeElement) || editors[editors.length - 1];
+        if (lastActive) lastActive.redo();
+      }
+    });
   </script>
 </body>
 </html>
